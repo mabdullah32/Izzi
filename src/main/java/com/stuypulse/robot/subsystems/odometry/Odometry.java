@@ -13,10 +13,14 @@ import com.stuypulse.robot.subsystems.vision.AprilTagVision;
 import com.stuypulse.robot.util.vision.AprilTag;
 import com.stuypulse.robot.util.vision.VisionData;
 
+import edu.wpi.first.math.Matrix;
+import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveDriveOdometry;
+import edu.wpi.first.math.numbers.N1;
+import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -103,10 +107,50 @@ public class Odometry extends SubsystemBase {
         estimator.update(swerve.getGyroAngle(), swerve.getModulePositions());
     }
 
+    private Matrix<N3, N1> getStdDevsFromArea(double areaPct) {
+        areaPct = 1 - Math.pow(areaPct - 1, 2);
+
+        SmartDashboard.putNumber("Vision/Transformed Pct", areaPct);
+
+        final double MAX_AREA_PCT = 0.4;
+        final double MIN_AREA_PCT = 0.05;
+
+        final double MIN_TRANSLATION_STDDEVS = 0.1;
+        final double MIN_ROTATION_STDDEVS = 0.1;
+
+        final double MAX_TRANSLATION_STDDEVS = 0.5;
+        final double MAX_ROTATION_STDDEVS = 0.5;
+
+        // (MAX_AREA_PCT, MIN_TRANSLATION_STDDEVS)
+        // (MIN_AREA_PCT, MAX_TRANSLATION_STDDEVS)
+
+        final double TRANSLATION_SLOPE = (MIN_TRANSLATION_STDDEVS - MAX_TRANSLATION_STDDEVS) / (MAX_AREA_PCT - MIN_AREA_PCT);
+        final double ROTATION_SLOPE = (MIN_ROTATION_STDDEVS - MAX_ROTATION_STDDEVS) / (MAX_AREA_PCT - MIN_AREA_PCT);
+
+        double translationStdDev = TRANSLATION_SLOPE * (areaPct - MAX_AREA_PCT) + MIN_TRANSLATION_STDDEVS;
+        double rotationStdDev = ROTATION_SLOPE * (areaPct - MAX_AREA_PCT) + MIN_TRANSLATION_STDDEVS;
+
+        SmartDashboard.putNumber("Vision/Translation Std Dev", translationStdDev);
+        SmartDashboard.putNumber("Vision/Rotation Std Dev", rotationStdDev);
+
+        return VecBuilder.fill(translationStdDev, translationStdDev, rotationStdDev);
+    }
+
     private void updateEstimatorWithVisionData(ArrayList<VisionData> outputs) {
+        if (outputs.size() == 0) return;
+        Pose2d avg = new Pose2d();
+        double time = 0;
         for (VisionData data : outputs) {
-            estimator.addVisionMeasurement(data.getPose().toPose2d(), data.getTimestamp());
+            avg = new Pose2d(
+                avg.getTranslation().plus(data.getPose().toPose2d().getTranslation()),
+                avg.getRotation().plus(data.getPose().toPose2d().getRotation())
+            );
+
+            time += data.getTimestamp();
+
+            // estimator.addVisionMeasurement(data.getPose().toPose2d(), data.getTimestamp());
         }
+        estimator.addVisionMeasurement(avg.div(outputs.size()), time / (double)outputs.size());
     }
 
     @Override

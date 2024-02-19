@@ -7,6 +7,8 @@
 package com.stuypulse.robot.util.vision;
 
 import com.stuypulse.robot.constants.Cameras.CameraConfig;
+import com.stuypulse.robot.constants.Settings.Vision;
+import com.stuypulse.robot.util.PoseLowPassFilter;
 import com.stuypulse.robot.constants.Field;
 
 import edu.wpi.first.math.geometry.Pose3d;
@@ -21,6 +23,7 @@ import edu.wpi.first.networktables.IntegerArraySubscriber;
 import edu.wpi.first.networktables.IntegerSubscriber;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.PubSubOption;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 import java.util.Optional;
@@ -43,12 +46,15 @@ public class TheiaCamera {
     private final double camera_gain = 0.0;
     private final double camera_brightness = 0.0;
 
+    private final int camera_pixel_count = camera_resolution_height * camera_resolution_width;
+
     // NetworkTables
     private final DoubleSubscriber latencySub;
     private final IntegerSubscriber fpsSub;
     private final DoubleArraySubscriber poseSub;
     private final IntegerArraySubscriber idSub;
     private final IntegerSubscriber counterSub;
+    private final DoubleSubscriber areaSub;
 
     private final DoubleArrayPublisher layoutPub;
 
@@ -57,7 +63,11 @@ public class TheiaCamera {
     private double[] rawPose;
     private long[] rawids;
     private long rawCounter;
+    private double rawArea;
     private long lastCounter;
+
+    // Filtered pose values
+    private PoseLowPassFilter filteredRobotPose;
 
     public TheiaCamera(String name, Pose3d cameraLocation) {
         this.name = name;
@@ -78,11 +88,14 @@ public class TheiaCamera {
         layoutPub.set(Field.getLayoutAsDoubleArray(Field.APRILTAGS));
 
         NetworkTable outputTable = table.getSubTable("output");
-        latencySub = outputTable.getDoubleTopic("latency").subscribe(0);
-        fpsSub = outputTable.getIntegerTopic("fps").subscribe(0);
-        poseSub = outputTable.getDoubleArrayTopic("pose").subscribe(new double[] {});
-        idSub = outputTable.getIntegerArrayTopic("tids").subscribe(new long[] {});
-        counterSub = outputTable.getIntegerTopic("update_counter").subscribe(0);
+        latencySub = outputTable.getDoubleTopic("latency").subscribe(0, PubSubOption.periodic(0.02));
+        fpsSub = outputTable.getIntegerTopic("fps").subscribe(0, PubSubOption.periodic(0.02));
+        poseSub = outputTable.getDoubleArrayTopic("pose").subscribe(new double[] {}, PubSubOption.periodic(0.02));
+        idSub = outputTable.getIntegerArrayTopic("tids").subscribe(new long[] {}, PubSubOption.periodic(0.02));
+        counterSub = outputTable.getIntegerTopic("update_counter").subscribe(0, PubSubOption.periodic(0.02));
+        areaSub = outputTable.getDoubleTopic("areas").subscribe(0, PubSubOption.periodic(0.02));
+
+        filteredRobotPose = new PoseLowPassFilter(Vision.CAMERA_TRANSLATION_RC, Vision.CAMERA_ROTATION_RC);
     }
 
     public TheiaCamera(CameraConfig config) {
@@ -119,6 +132,7 @@ public class TheiaCamera {
         rawPose = poseSub.get();
         rawids = idSub.get();
         rawCounter = counterSub.get();
+        rawArea = areaSub.get();
     }
 
     /**
@@ -166,6 +180,8 @@ public class TheiaCamera {
 
         if (!hasData()) return Optional.empty();
 
+        filteredRobotPose.update(getRobotPose());
+
         double fpgaTime = latencySub.getLastChange() / 1_000_000.0;
         double timestamp = fpgaTime - Units.millisecondsToSeconds(rawLatency);
 
@@ -177,7 +193,7 @@ public class TheiaCamera {
 
         lastCounter = rawCounter;
 
-        VisionData data = new VisionData(getRobotPose(), getIDs(), timestamp);
+        VisionData data = new VisionData(filteredRobotPose.get(), getIDs(), timestamp, rawArea / (double)camera_pixel_count, getName());
 
         if (!data.isValidData()) {
             return Optional.empty();
