@@ -21,27 +21,27 @@ public class FivePieceCBAE extends SequentialCommandGroup {
                 new WaitCommand(Auton.SHOOTER_STARTUP_DELAY)
                     .andThen(new ShooterPodiumShot()),
                 
-                new SwerveDriveToShoot(-37)
+                SwerveDriveToPose.speakerRelative(-37)
                     .withTimeout(2.5)
             ),
-        
+
             new ConveyorShootRoutine(),
 
             new IntakeAcquire().withTimeout(Auton.DEFAULT_INTAKE_TIMEOUT),
-            new SwerveDriveToPose(() -> SwerveDriveToShoot.getSpeakerTargetPose(2.9))
-                .withTolerance(0.1, 0.1, 5),
+            new SwerveDriveToShoot(2.9)
+                .withTolerance(0.1, 5),
             new ConveyorShootRoutine(),
 
             new FollowPathAndIntake("C to B"),
-            new SwerveDriveToShoot(5),
+            SwerveDriveToPose.speakerRelative(5),
             new ConveyorShootRoutine(),
 
             new FollowPathAndIntake("B To A"),
-            new SwerveDriveToShoot(35),
+            SwerveDriveToPose.speakerRelative(35),
             new ConveyorShootRoutine(),
 
             new FollowPathAndIntake("A To E"),
-            new FollowPathAlignAndShoot("E To Shoot", 30)
+            new FollowPathAlignAndShoot("E To Shoot", SwerveDriveToPose.speakerRelative(30))
         );
     }
     
